@@ -1,0 +1,24 @@
+version: 2
+
+# 依存の定期更新 PR を Dependabot に作らせる。
+# PR は人間がレビュー＆マージする（自動マージはしない＝安全側）。
+# マージで Cargo.lock が変わると auto-patch-release.yml が patch を自動 bump してリリースする。
+updates:
+  # Rust の依存（バイナリに影響する）。更新は patch 自動リリースの対象になる。
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+      include: scope
+
+  # GitHub Actions 自身の更新（Cargo.lock を変えないので自動リリースは発火しない）。
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore

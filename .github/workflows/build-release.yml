@@ -1,0 +1,122 @@
+name: build-release
+
+# 再利用可能なビルド&リリース手順（単一の真実）。
+# タグ push 経由の release.yml と、依存更新時の自動 patch bump（auto-patch-release.yml）の
+# 両方からこのワークフローを呼び出す。ビルド・テスト・リリース添付のロジックはここだけに置く。
+#
+# 呼び出し側は、公開したいタグ名（例: v0.1.3）を tag 入力で渡す。
+# タグは呼び出し側が既に作成・push 済みである前提（ここでは作らない）。
+#
+# ジョブ構成: guard（検証） → build（matrix・各プラットフォームを並行ビルド） → publish（1回だけ Release 作成）
+#   matrix を並行させつつ「既存タグへの上書き禁止」を保つため、Release 作成は publish で 1 回だけ行う。
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: 'リリースするタグ名（例: v0.1.3）。Cargo.toml の version と一致している必要がある。'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: タグ名と Cargo.toml の version が一致することを検証
+        # 「タグ名 = 常に Cargo.toml の version」という前提を機械的に担保する（Issue #1）。
+        run: |
+          TAG="${{ inputs.tag }}"
+          VERSION="$(grep -m1 '^version = ' Cargo.toml | sed -E 's/version = "([^"]+)"/\1/')"
+          if [ "${TAG}" != "v${VERSION}" ]; then
+            echo "::error::タグ名(${TAG})と Cargo.toml の version(v${VERSION})が一致しません。" >&2
+            exit 1
+          fi
+          echo "OK: ${TAG} == v${VERSION}"
+
+      - name: 同名リリースが既に存在しないことを検証
+        # 既存タグへの再アップロードは想定外の事故（Issue #1）。--clobber で無言に上書きせず、
+        # 既にリリースが在れば明示的に fail する。tag=version=一意 の前提を守る。
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ inputs.tag }}"
+          if gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "::error::リリース ${TAG} は既に存在します。既存タグへの上書きは行いません（version を上げて新タグを切ってください）。" >&2
+            exit 1
+          fi
+          echo "OK: ${TAG} は未作成"
+
+  build:
+    needs: guard
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            asset: discord-send-notifier-x86_64-linux-musl
+            # rustls(ring) の C/asm ビルドに musl-gcc が要る
+            setup: sudo apt-get update && sudo apt-get install -y musl-tools
+          - os: macos-14
+            target: aarch64-apple-darwin
+            asset: discord-send-notifier-aarch64-macos
+            setup: "true"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Install Rust target
+        run: |
+          rustup update stable
+          rustup target add ${{ matrix.target }}
+
+      - name: Platform setup
+        run: ${{ matrix.setup }}
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Test
+        run: cargo test --release --target ${{ matrix.target }}
+
+      - name: Stage artifact
+        run: |
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/discord-send-notifier" \
+             "dist/${{ matrix.asset }}"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create GitHub Release and upload artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          TAG="${{ inputs.tag }}"
+          gh release create "${TAG}" --repo "${GITHUB_REPOSITORY}" \
+            --title "${TAG}" \
+            --notes "各プラットフォーム向けバイナリ。install.sh が OS/arch を判定して取得する。" \
+            dist/*

@@ -1,0 +1,100 @@
+name: auto-patch-release
+
+# 依存更新（主に Dependabot PR のマージ）で Cargo.lock が変わったら、
+# patch バージョンを自動で 1 つ上げて新しいタグ付きリリースを発行する。
+# 「バージョンが動く」ことで、依存更新が入った事実を一目で分かるようにする（会長方針）。
+#
+# 発火条件（bump ジョブ内で厳密判定）:
+#   - この push で Cargo.lock が変わっている（＝依存が実際に変化しバイナリに影響しうる）
+#   - かつ Cargo.toml の version は変わっていない（＝人間のリリース作業ではない）
+#     → version を人が上げた push は「手動リリース中」とみなしスキップし、二重発火を防ぐ。
+#   - github-actions 等の更新は Cargo.lock を変えないため発火しない（バイナリに影響する時だけ動く）。
+#
+# 補足: GITHUB_TOKEN で push したコミット/タグは他ワークフローを再トリガーしないため、
+#       bump コミットや作成タグで無限ループや release.yml の二重発火は起きない。
+#       よってリリースは release.yml 任せにせず、この中から build-release を直接呼ぶ。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Cargo.lock'
+      - 'Cargo.toml'
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.decide.outputs.should_release }}
+      new_tag: ${{ steps.decide.outputs.new_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # 直前コミットとの差分判定に使う
+
+      - name: 依存更新かどうかを判定し、必要なら patch を上げてタグを切る
+        id: decide
+        run: |
+          set -euo pipefail
+
+          # 1) この push で Cargo.lock が変わったか
+          if ! git diff --name-only HEAD~1 HEAD | grep -qx 'Cargo.lock'; then
+            echo "Cargo.lock に変更なし。何もしない。"
+            echo "should_release=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          # 2) Cargo.toml の version が変わっていないか（変わっていれば人間のリリース → スキップ）
+          extract_version() { grep -m1 '^version = ' "$1" | sed -E 's/version = "([^"]+)"/\1/'; }
+          CUR_VER="$(extract_version Cargo.toml)"
+          PREV_VER="$(git show HEAD~1:Cargo.toml | grep -m1 '^version = ' | sed -E 's/version = "([^"]+)"/\1/')"
+          if [ "${CUR_VER}" != "${PREV_VER}" ]; then
+            echo "version が ${PREV_VER} -> ${CUR_VER} と変更済み（人間のリリース作業）。自動 bump はスキップ。"
+            echo "should_release=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          # 3) patch を 1 つ上げる
+          MAJOR="$(echo "${CUR_VER}" | cut -d. -f1)"
+          MINOR="$(echo "${CUR_VER}" | cut -d. -f2)"
+          PATCH="$(echo "${CUR_VER}" | cut -d. -f3)"
+          NEW_VER="${MAJOR}.${MINOR}.$((PATCH + 1))"
+          NEW_TAG="v${NEW_VER}"
+          echo "依存更新を検知。version ${CUR_VER} -> ${NEW_VER} に自動 bump します。"
+
+          # Cargo.toml の [package] version を更新
+          awk -v nv="${NEW_VER}" '
+            /^\[package\]/ { inpkg=1 }
+            /^\[/ && !/^\[package\]/ { inpkg=0 }
+            inpkg && /^version = / && !done { sub(/"[^"]+"/, "\"" nv "\""); done=1 }
+            { print }
+          ' Cargo.toml > Cargo.toml.tmp && mv Cargo.toml.tmp Cargo.toml
+
+          # Cargo.lock 内の自パッケージ version も同期（tag=version=一意 の前提を崩さない）
+          awk -v nv="${NEW_VER}" '
+            /^name = "discord-send-notifier"$/ { found=1 }
+            found && /^version = / && !done { sub(/"[^"]+"/, "\"" nv "\""); done=1; found=0 }
+            { print }
+          ' Cargo.lock > Cargo.lock.tmp && mv Cargo.lock.tmp Cargo.lock
+
+          # コミット & タグを push（GITHUB_TOKEN の push は再トリガーしない）
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml Cargo.lock
+          git commit -m "chore: 依存更新に伴い patch を ${CUR_VER} -> ${NEW_VER} へ自動 bump"
+          git tag "${NEW_TAG}"
+          git push origin HEAD:main
+          git push origin "${NEW_TAG}"
+
+          echo "should_release=true" >> "${GITHUB_OUTPUT}"
+          echo "new_tag=${NEW_TAG}" >> "${GITHUB_OUTPUT}"
+
+  release:
+    needs: bump
+    if: needs.bump.outputs.should_release == 'true'
+    uses: ./.github/workflows/build-release.yml
+    with:
+      tag: ${{ needs.bump.outputs.new_tag }}
