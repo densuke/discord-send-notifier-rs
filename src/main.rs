@@ -182,14 +182,40 @@ fn now_utc_rfc3339() -> String {
     format!("{y:04}-{mo:02}-{d:02}T{h:02}:{mi:02}:{s:02}Z")
 }
 
+/// footer を解決する。`--footer` 優先、無ければ環境変数 `DISCORD_DEFAULT_FOOTER`。
+/// いずれも空/未設定なら None。全通知へ発信元を常時載せたい運用（例: ノード名）向け。
+fn resolve_footer(args: &Args) -> Option<String> {
+    if let Some(f) = &args.footer {
+        let t = f.trim();
+        if !t.is_empty() {
+            return Some(t.to_string());
+        }
+    }
+    if let Ok(v) = std::env::var("DISCORD_DEFAULT_FOOTER") {
+        let t = v.trim();
+        if !t.is_empty() {
+            return Some(t.to_string());
+        }
+    }
+    None
+}
+
 /// CLI 引数から送信ペイロード（`{"content":..,"embeds":[..]}`）を組み立てる。
-/// Embed 系オプションが一切無ければ content 単体の単純通知にする。
+/// footer は env も含めて解決してから純粋関数へ委譲する。
 fn build_payload(args: &Args) -> Value {
+    let footer = resolve_footer(args);
+    build_payload_inner(args, footer.as_deref())
+}
+
+/// ペイロード組み立ての純粋部分（footer は解決済みを受け取る）。
+/// footer が解決されている場合、Embed 系オプションが他に無くても最小 Embed に footer を
+/// 載せて発信元を常時表示する（send_notification.py #80 と同等）。
+fn build_payload_inner(args: &Args, footer: Option<&str>) -> Value {
     let has_embed = args.title.is_some()
         || args.description.is_some()
         || !args.field.is_empty()
         || args.timestamp
-        || args.footer.is_some()
+        || footer.is_some()
         || args.level != "info";
 
     let mut payload = json!({});
@@ -220,7 +246,7 @@ fn build_payload(args: &Args) -> Value {
         if args.timestamp {
             embed["timestamp"] = json!(now_utc_rfc3339());
         }
-        if let Some(f) = &args.footer {
+        if let Some(f) = footer {
             embed["footer"] = json!({ "text": f });
         }
         let fields: Vec<Value> = args
@@ -415,7 +441,8 @@ mod tests {
     fn simple_message_is_content_only() {
         let mut a = base_args();
         a.message = Some("hello".to_string());
-        let p = build_payload(&a);
+        // footer 無し（env非依存の純粋関数で検証）。
+        let p = build_payload_inner(&a, None);
         assert_eq!(p["content"], "hello");
         assert!(
             p.get("embeds").is_none(),
@@ -429,7 +456,7 @@ mod tests {
         a.title = Some("T".to_string());
         a.description = Some("D".to_string());
         a.level = "warning".to_string();
-        let p = build_payload(&a);
+        let p = build_payload_inner(&a, None);
         let embed = &p["embeds"][0];
         assert_eq!(embed["color"], 15105570);
         assert_eq!(embed["title"], "T");
@@ -441,7 +468,7 @@ mod tests {
         let mut a = base_args();
         a.title = Some("T".to_string());
         a.message = Some("body".to_string());
-        let p = build_payload(&a);
+        let p = build_payload_inner(&a, None);
         assert_eq!(p["embeds"][0]["description"], "body");
         // message は content にも載る。
         assert_eq!(p["content"], "body");
@@ -452,9 +479,8 @@ mod tests {
         let mut a = base_args();
         a.level = "success".to_string();
         a.field = vec!["k1:v1:true".to_string(), "k2:v2".to_string()];
-        a.footer = Some("🏢 ノード: shiten".to_string());
         a.timestamp = true;
-        let p = build_payload(&a);
+        let p = build_payload_inner(&a, Some("🏢 ノード: shiten"));
         let embed = &p["embeds"][0];
         let fields = embed["fields"].as_array().unwrap();
         assert_eq!(fields.len(), 2);
@@ -465,11 +491,28 @@ mod tests {
     }
 
     #[test]
+    fn footer_alone_forces_minimal_embed() {
+        // footer が解決されていれば、他に Embed 要素が無くても最小 Embed に載る（#80 相当）。
+        let mut a = base_args();
+        a.message = Some("hello".to_string());
+        let p = build_payload_inner(&a, Some("🏢 ノード: honten"));
+        assert_eq!(p["content"], "hello");
+        assert_eq!(p["embeds"][0]["footer"]["text"], "🏢 ノード: honten");
+    }
+
+    #[test]
+    fn resolve_footer_prefers_arg() {
+        let mut a = base_args();
+        a.footer = Some("from-arg".to_string());
+        assert_eq!(resolve_footer(&a), Some("from-arg".to_string()));
+    }
+
+    #[test]
     fn mention_prepended_to_content() {
         let mut a = base_args();
         a.message = Some("deploy done".to_string());
         a.mention = Some("here".to_string());
-        let p = build_payload(&a);
+        let p = build_payload_inner(&a, None);
         assert_eq!(p["content"], "@here deploy done");
     }
 

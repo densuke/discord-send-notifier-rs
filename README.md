@@ -67,6 +67,19 @@ discord-send-notifier --mention here "デプロイが失敗しました" --level
 | `-m, --mention <here\|everyone\|ID>` | メンション |
 | `--footer <TEXT>` | Embed の footer テキスト（発信元・ノード名など） |
 | `--timestamp` | Embed に現在時刻（UTC）を含める |
+
+### 全通知へ発信元を常時載せる（ドロップイン置換向け）
+
+環境変数 **`DISCORD_DEFAULT_FOOTER`** を設定すると、`--footer` 未指定の全通知にその footer が
+自動で付きます（単純メッセージでも最小 Embed を作って載せます）。既存の通知スクリプトを
+「発信元 footer を常に付ける」挙動のまま本ツールへ差し替える用途に使えます。
+
+```bash
+export DISCORD_DEFAULT_FOOTER="🏢 ノード: shiten"
+discord-send-notifier "定期バッチ完了"   # → footer 付きで届く
+```
+
+`--footer` を明示した場合はそちらが優先されます。
 | `--webhook-url <URL>` | Webhook URL を直接指定 |
 | `--env-file <PATH>` | Webhook URL を読む `.env` のパス |
 
