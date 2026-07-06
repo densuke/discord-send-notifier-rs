@@ -12,19 +12,41 @@ Discord へ POST します。負荷監視のように「通知のために更に
 
 ## インストール
 
-[Releases](https://github.com/densuke/discord-send-notifier-rs/releases) から
-`discord-send-notifier-x86_64-linux-musl` をダウンロードして実行権を付けて配置します。
+`install.sh` が OS/arch を判定して最新リリースのバイナリを `~/.local/bin` へ配置します
+（public リポジトリなので `curl` のみ・`gh` 認証不要）。
 
 ```bash
-install -m 0755 discord-send-notifier-x86_64-linux-musl ~/.local/bin/discord-send-notifier
+curl -fsSL https://raw.githubusercontent.com/densuke/discord-send-notifier-rs/main/install.sh | bash
 ```
 
-ソースからビルドする場合:
+対応プラットフォーム:
+
+| プラットフォーム | アセット |
+|---|---|
+| Linux x86_64 | `discord-send-notifier-x86_64-linux-musl`（静的バイナリ） |
+| macOS Apple Silicon | `discord-send-notifier-aarch64-macos` |
+
+固定 URL `…/releases/latest/download/<asset>` は常に最新を指すので、直接取得も可能:
+
+```bash
+curl -fsSL https://github.com/densuke/discord-send-notifier-rs/releases/latest/download/discord-send-notifier-x86_64-linux-musl \
+  -o ~/.local/bin/discord-send-notifier && chmod +x ~/.local/bin/discord-send-notifier
+```
+
+### 更新（定期チェック）
+
+`install.sh` は冪等です。`--version` が最新タグと一致すればダウンロードしません。
+systemd timer（Linux）や launchd（macOS）から定期実行すれば自動更新になります。
+
+```bash
+./install.sh          # 最新でなければ更新
+./install.sh --force  # 強制再取得
+```
+
+### ソースからビルド
 
 ```bash
 cargo build --release
-# 静的 Linux バイナリ（他マシン配布向け）
-cargo build --release --target x86_64-unknown-linux-musl
 ```
 
 ## 使い方
