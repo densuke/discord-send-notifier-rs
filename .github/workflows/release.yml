@@ -1,8 +1,9 @@
 name: release
 
 # タグ push で各プラットフォームのバイナリをビルドし、GitHub Release に添付する。
-#   git tag v0.1.0 && git push origin v0.1.0
-# 手動実行(workflow_dispatch)も可。public リポジトリなので Actions は macOS ランナーも含め無料。
+#   git tag v0.1.3 && git push origin v0.1.3
+# 実ビルド・リリース手順は再利用可能な build-release.yml に集約している（単一の真実）。
+# 依存更新時の自動 patch リリース(auto-patch-release.yml)も同じ build-release.yml を呼ぶ。
 #
 # 生成物:
 #   - discord-send-notifier-x86_64-linux-musl  … 支店/Linux(x86_64) 用・静的バイナリ
@@ -12,62 +13,12 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  build-and-release:
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-musl
-            asset: discord-send-notifier-x86_64-linux-musl
-            # rustls(ring) の C/asm ビルドに musl-gcc が要る
-            setup: sudo apt-get update && sudo apt-get install -y musl-tools
-          - os: macos-14
-            target: aarch64-apple-darwin
-            asset: discord-send-notifier-aarch64-macos
-            setup: "true"
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust target
-        run: |
-          rustup update stable
-          rustup target add ${{ matrix.target }}
-
-      - name: Platform setup
-        run: ${{ matrix.setup }}
-
-      - name: Build
-        run: cargo build --release --target ${{ matrix.target }}
-
-      - name: Test
-        run: cargo test --release --target ${{ matrix.target }}
-
-      - name: Stage artifact
-        run: |
-          mkdir -p dist
-          cp "target/${{ matrix.target }}/release/discord-send-notifier" \
-             "dist/${{ matrix.asset }}"
-
-      - name: Upload to GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            TAG="${GITHUB_REF_NAME}"
-          else
-            TAG="manual-${GITHUB_SHA::7}"
-          fi
-          # 複数ジョブが並行するため release 作成は寛容に（既存なら無視）、アセットは名前別で衝突しない。
-          gh release create "${TAG}" --repo "${GITHUB_REPOSITORY}" \
-            --title "${TAG}" \
-            --notes "各プラットフォーム向けバイナリ。install.sh が OS/arch を判定して取得する。" \
-            2>/dev/null || true
-          gh release upload "${TAG}" "dist/${{ matrix.asset }}" \
-            --repo "${GITHUB_REPOSITORY}" --clobber
+  call-build-release:
+    uses: ./.github/workflows/build-release.yml
+    with:
+      tag: ${{ github.ref_name }}
