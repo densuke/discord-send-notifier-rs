@@ -1,0 +1,58 @@
+name: release
+
+# タグ push で Linux 静的バイナリ(musl)をビルドし、GitHub Release に添付する。
+#   git tag v0.1.0 && git push origin v0.1.0
+# 手動実行(workflow_dispatch)も可。public リポジトリなので Actions は無料。
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (musl target)
+        run: |
+          rustup update stable
+          rustup target add x86_64-unknown-linux-musl
+
+      - name: Install musl toolchain
+        # rustls(ring) の C/asm ビルドに musl-gcc が要る
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Build static binary
+        run: cargo build --release --target x86_64-unknown-linux-musl
+
+      - name: Test
+        run: cargo test --release
+
+      - name: Stage artifact
+        run: |
+          mkdir -p dist
+          cp target/x86_64-unknown-linux-musl/release/discord-send-notifier \
+             dist/discord-send-notifier-x86_64-linux-musl
+
+      - name: Upload to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            TAG="${GITHUB_REF_NAME}"
+          else
+            TAG="manual-${GITHUB_SHA::7}"
+          fi
+          gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1 \
+            || gh release create "${TAG}" --repo "${GITHUB_REPOSITORY}" \
+                 --title "${TAG}" \
+                 --notes "静的 Linux バイナリ (x86_64-unknown-linux-musl)。"
+          gh release upload "${TAG}" \
+            dist/discord-send-notifier-x86_64-linux-musl \
+            --repo "${GITHUB_REPOSITORY}" --clobber
