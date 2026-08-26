@@ -1,6 +1,6 @@
 [package]
 name = "discord-send-notifier"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2024"
 description = "軽量な単一バイナリの Discord Webhook 通知 CLI（Python/インタプリタ起動不要）"
 license = "MIT"
