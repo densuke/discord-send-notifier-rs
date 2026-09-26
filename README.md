@@ -85,7 +85,7 @@ discord-send-notifier --mention here "デプロイが失敗しました" --level
 | `-l, --level <LEVEL>` | `info`（既定）/ `success` / `warning` / `error`。Embed の色を決める |
 | `-t, --title <TITLE>` | Embed のタイトル |
 | `-d, --description <DESC>` | Embed の説明（未指定なら MESSAGE を使う） |
-| `-f, --field <Name:Value[:inline]>` | Embed フィールド。複数指定可。`inline` は `true`/`false`（既定 false） |
+| `-f, --field <Name:Value[:inline]>` | Embed フィールド。複数指定可。最初の `:` で名前と値に分けるので、値に `:`（URL など）を含めてよい。末尾が `:true` / `:false` のときだけ inline 指定として扱う（既定 false） |
 | `-m, --mention <here\|everyone\|ID>` | メンション |
 | `--footer <TEXT>` | Embed の footer テキスト（発信元・ノード名など） |
 | `--timestamp` | Embed に現在時刻（UTC）を含める |
