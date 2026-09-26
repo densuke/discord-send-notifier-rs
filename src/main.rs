@@ -43,7 +43,7 @@ struct Args {
     description: Option<String>,
 
     /// Embed のフィールド。`Name:Value[:inline]` 形式。複数指定可。
-    /// inline は `true`/`false`（既定 false）。
+    /// 値に `:`（URL 等）を含めてよい。末尾が `:true`/`:false` のときだけ inline 指定（既定 false）。
     #[arg(short, long)]
     field: Vec<String>,
 
@@ -136,19 +136,20 @@ fn resolve_webhook_url(args: &Args) -> Option<String> {
 }
 
 /// `Name:Value[:inline]` を Embed field の JSON へ。壊れた形式は None（呼び出し側で警告）。
+/// 最初の ':' で名前と値に分け、値の末尾が `:true` / `:false` のときだけ inline 指定として取り除く。
+/// 値に ':'（URL 等）を含んでも切れない（Agy-Virtual-Office#698）。
 fn parse_field(spec: &str) -> Option<Value> {
-    // Python 版と同じく split(":", 2) 相当（最大3分割・3つ目に ':' を残す）。
-    let mut it = spec.splitn(3, ':');
-    let name = it.next()?.trim();
-    let value = it.next()?.trim();
+    let (name, rest) = spec.split_once(':')?;
+    let name = name.trim();
     if name.is_empty() {
         return None;
     }
-    let inline = it
-        .next()
-        .map(|s| s.trim().eq_ignore_ascii_case("true"))
-        .unwrap_or(false);
-    Some(json!({ "name": name, "value": value, "inline": inline }))
+    let (value, inline) = match rest.rsplit_once(':') {
+        Some((v, flag)) if flag.trim().eq_ignore_ascii_case("true") => (v, true),
+        Some((v, flag)) if flag.trim().eq_ignore_ascii_case("false") => (v, false),
+        _ => (rest, false),
+    };
+    Some(json!({ "name": name, "value": value.trim(), "inline": inline }))
 }
 
 /// Unix エポック秒を UTC 民用時刻へ（Howard Hinnant の civil_from_days）。うるう秒は不問。
@@ -424,15 +425,35 @@ mod tests {
             Some(json!({ "name": "空き", "value": "2%", "inline": true }))
         );
         assert_eq!(
+            parse_field("Name:Value:true"),
+            Some(json!({ "name": "Name", "value": "Value", "inline": true }))
+        );
+        assert_eq!(
+            parse_field("Name:Value:FALSE"),
+            Some(json!({ "name": "Name", "value": "Value", "inline": false }))
+        );
+        assert_eq!(
             parse_field("Name:Value"),
             Some(json!({ "name": "Name", "value": "Value", "inline": false }))
         );
-        // 3分割目に ':' を残す（URL 等）。
+        // 最初の ':' だけで分ける。値の中の ':'（URL 等）はそのまま残す（Agy#698）。
         assert_eq!(
             parse_field("URL:http://x:y"),
-            Some(json!({ "name": "URL", "value": "http", "inline": false }))
+            Some(json!({ "name": "URL", "value": "http://x:y", "inline": false }))
         );
-        // 名前空・値なしは None。
+        assert_eq!(
+            parse_field("Issue:#655 https://github.com/densuke/Agy-Virtual-Office/issues/655"),
+            Some(json!({
+                "name": "Issue",
+                "value": "#655 https://github.com/densuke/Agy-Virtual-Office/issues/655",
+                "inline": false
+            }))
+        );
+        assert_eq!(
+            parse_field("URL:https://example.com:8080/x:true"),
+            Some(json!({ "name": "URL", "value": "https://example.com:8080/x", "inline": true }))
+        );
+        // 名前空・':' 無しは None。
         assert_eq!(parse_field(":v:true"), None);
         assert_eq!(parse_field("only-name"), None);
     }
