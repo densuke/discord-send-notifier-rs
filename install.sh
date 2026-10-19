@@ -23,6 +23,7 @@ detect_asset() {
     arch="$(uname -m)"
     case "${os}/${arch}" in
         Linux/x86_64) echo "discord-send-notifier-x86_64-linux-musl" ;;
+        Linux/aarch64 | Linux/arm64) echo "discord-send-notifier-aarch64-linux-musl" ;;
         Darwin/arm64 | Darwin/aarch64) echo "discord-send-notifier-aarch64-macos" ;;
         *)
             echo "ERROR: 未対応のプラットフォーム: ${os}/${arch}" >&2
