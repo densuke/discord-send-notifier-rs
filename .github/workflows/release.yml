@@ -7,6 +7,7 @@ name: release
 #
 # 生成物:
 #   - discord-send-notifier-x86_64-linux-musl  … 支店/Linux(x86_64) 用・静的バイナリ
+#   - discord-send-notifier-aarch64-linux-musl … Linux(aarch64, Raspberry Pi など) 用・静的バイナリ
 #   - discord-send-notifier-aarch64-macos      … 本店/macOS(Apple Silicon) 用
 
 on:

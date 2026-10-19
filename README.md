@@ -24,6 +24,7 @@ curl -fsSL https://raw.githubusercontent.com/densuke/discord-send-notifier-rs/ma
 | プラットフォーム | アセット |
 |---|---|
 | Linux x86_64 | `discord-send-notifier-x86_64-linux-musl`（静的バイナリ） |
+| Linux aarch64（Raspberry Pi など） | `discord-send-notifier-aarch64-linux-musl`（静的バイナリ） |
 | macOS Apple Silicon | `discord-send-notifier-aarch64-macos` |
 
 固定 URL `…/releases/latest/download/<asset>` は常に最新を指すので、直接取得も可能:

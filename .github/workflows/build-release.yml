@@ -63,6 +63,11 @@ jobs:
             asset: discord-send-notifier-x86_64-linux-musl
             # rustls(ring) の C/asm ビルドに musl-gcc が要る
             setup: sudo apt-get update && sudo apt-get install -y musl-tools
+          # Raspberry Pi などの Linux(aarch64) 用。Arm ランナーでネイティブにビルド・テストする
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            asset: discord-send-notifier-aarch64-linux-musl
+            setup: sudo apt-get update && sudo apt-get install -y musl-tools
           - os: macos-14
             target: aarch64-apple-darwin
             asset: discord-send-notifier-aarch64-macos
